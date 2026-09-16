@@ -1,0 +1,51 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.jdobf'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // ASM 9.8 新增 Opcodes.V25，支持 Java 25 字节码（class major 69）
+    implementation 'org.ow2.asm:asm:9.8'
+    implementation 'org.ow2.asm:asm-tree:9.8'
+    implementation 'org.ow2.asm:asm-commons:9.8'
+    implementation 'org.ow2.asm:asm-analysis:9.8'
+    // FlatLaf：Windows 11 风格的现代扁平外观（Swing 原生，兼容 JDK 8+）
+    implementation 'com.formdev:flatlaf:3.5.4'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+compileJava {
+    options.encoding = 'UTF-8'
+}
+
+jar {
+    manifest {
+        attributes 'Main-Class': 'com.jdobf.Main'
+    }
+}
+
+// 可直接运行的 fat jar（不依赖第三方插件，保证离线/旧环境也能构建）
+task fatJar(type: Jar) {
+    archiveClassifier = 'all'
+    manifest {
+        attributes 'Main-Class': 'com.jdobf.Main'
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    with jar
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    exclude 'module-info.class', 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA'
+}
+
+build.dependsOn fatJar

@@ -1,0 +1,30 @@
+# Gradle and build outputs
+.gradle/
+build/
+bin/
+
+# IDE metadata
+.idea/
+*.iml
+
+# Logs and JVM crash dumps
+*.log
+hs_err_pid*.log
+
+# Locally generated archives
+/*.jar
+testbed/**/*.jar
+testbed/**/*.class
+
+# Generated testbed output; source scripts and fixtures remain trackable
+testbed/**/*.txt
+testbed/**/*.err
+testbed/**/*.out
+testbed/**/*.mapping
+testbed/**/*.dump
+testbed/**/*.tmp
+testbed/*.jpg
+testbed/*.png
+testbed/aggxx/
+testbed/tmpcl/
+testbed/xjar/
