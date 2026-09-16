@@ -98,9 +98,21 @@ public class MainFrame extends JFrame {
             new JSpinner(new javax.swing.SpinnerNumberModel(0, 0, MAX_DEAD_CLASSES, 1));
 
     private final JProgressBar progressBar = new JProgressBar();
-    private final JTextArea logArea = new JTextArea();
+    private final javax.swing.JTextPane logArea = new javax.swing.JTextPane();
     private final JButton startButton = new JButton("开始混淆");
+    private final JButton clearLogButton = new JButton("清空日志");
+    private final JCheckBox chkHideResources = new JCheckBox("隐藏资源文件（仅显示类与包）", true);
+    private final JLabel statusLabel = new JLabel("就绪");
+    private final StatusDot statusDot = new StatusDot();
     private JButton themeButton;
+
+    /** 上次启动混淆的时间戳（毫秒），用于状态栏计时显示。 */
+    private long runStartMillis = 0L;
+
+    /** 最近一次加载的 JAR 原始条目（供资源过滤开关切换时重建树使用）。 */
+    private List<CheckBoxTree.PathEntry> cachedEntries = null;
+
+    private enum RunState { IDLE, RUNNING, DONE, ERROR }
 
     /** 需要随主题换色的文字标签 */
     private final List<JLabel> cardTitles = new ArrayList<JLabel>();
@@ -131,25 +143,26 @@ public class MainFrame extends JFrame {
     // ------------------------------------------------------------------
 
     private JComponent buildContent() {
-        JPanel root = new JPanel(new BorderLayout(0, 12));
-        root.setBorder(BorderFactory.createEmptyBorder(14, 16, 14, 16));
+        JPanel root = new JPanel(new BorderLayout(0, 8));
+        root.setBorder(BorderFactory.createEmptyBorder(12, 14, 10, 14));
 
         Box north = Box.createVerticalBox();
         JComponent header = buildHeader();
         header.setAlignmentX(Component.LEFT_ALIGNMENT);
         north.add(header);
-        north.add(Box.createVerticalStrut(12));
+        north.add(Box.createVerticalStrut(10));
         JComponent fileCard = buildFileCard();
         fileCard.setAlignmentX(Component.LEFT_ALIGNMENT);
         north.add(fileCard);
         root.add(north, BorderLayout.NORTH);
 
         JTabbedPane tabs = new JTabbedPane();
-        tabs.addTab("混淆选项", wrapScroll(buildOptionsPanel()));
-        tabs.addTab("排除项（不混淆的类/包）", wrapScroll(buildExcludePanel()));
+        tabs.addTab("混淆设置", wrapScroll(buildOptionsPanel()));
+        tabs.addTab("排除项", buildExcludePanel());
+        tabs.addTab("控制台", buildConsoleTab());
         root.add(tabs, BorderLayout.CENTER);
 
-        root.add(buildConsoleCard(), BorderLayout.SOUTH);
+        root.add(buildStatusBar(), BorderLayout.SOUTH);
         return root;
     }
 
@@ -220,9 +233,18 @@ public class MainFrame extends JFrame {
     }
 
     private JComponent buildExcludePanel() {
-        JPanel p = new JPanel(new BorderLayout(0, 12));
+        JPanel p = new JPanel(new BorderLayout(0, 8));
         p.setBorder(BorderFactory.createEmptyBorder(6, 4, 6, 4));
         p.setOpaque(false);
+
+        // 资源文件过滤开关：默认隐藏资源，避免资源条目淹没类/包
+        chkHideResources.setFocusPainted(false);
+        chkHideResources.setToolTipText("资源文件（.png/.xml/.properties 等）无法被排除，"
+                + "默认隐藏以保持树结构清爽；取消勾选可查看完整 JAR 条目");
+        JPanel filterRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        filterRow.setOpaque(false);
+        filterRow.add(chkHideResources);
+        p.add(filterRow, BorderLayout.NORTH);
 
         tree.setOpaque(false);
         JScrollPane treeScroll = new JScrollPane(tree);
@@ -446,20 +468,30 @@ public class MainFrame extends JFrame {
         p.add(cb, c);
     }
 
-    /** 底部控制台卡片：进度 + 主操作按钮 + 日志终端 */
-    private JComponent buildConsoleCard() {
-        Card card = new Card("运行日志");
+    /** 控制台页签：独占整个窗口，进度条 + 操作按钮 + 大尺寸日志终端。 */
+    private JComponent buildConsoleTab() {
         JPanel body = new JPanel(new BorderLayout(0, 8));
+        body.setBorder(BorderFactory.createEmptyBorder(10, 8, 8, 8));
         body.setOpaque(false);
 
+        // 顶部工具条：进度条 + 开始按钮 + 清空按钮
         JPanel row = new JPanel(new BorderLayout(10, 0));
         row.setOpaque(false);
         progressBar.setStringPainted(true);
         progressBar.setPreferredSize(new Dimension(progressBar.getPreferredSize().width, 26));
         row.add(progressBar, BorderLayout.CENTER);
+        JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        btnRow.setOpaque(false);
+        clearLogButton.setFocusPainted(false);
+        clearLogButton.addActionListener(e -> {
+            logArea.setText("");
+            setStatus(RunState.IDLE);
+        });
         startButton.setPreferredSize(new Dimension(128, 32));
         startButton.setFocusPainted(false);
-        row.add(startButton, BorderLayout.EAST);
+        btnRow.add(clearLogButton);
+        btnRow.add(startButton);
+        row.add(btnRow, BorderLayout.EAST);
         body.add(row, BorderLayout.NORTH);
 
         logArea.setEditable(false);
@@ -471,11 +503,26 @@ public class MainFrame extends JFrame {
         logScroll.setBorder(BorderFactory.createEmptyBorder());
         logScroll.getViewport().setOpaque(false);
         logScroll.getVerticalScrollBar().setUnitIncrement(16);
-        logScroll.setPreferredSize(new Dimension(600, 150));
         body.add(logScroll, BorderLayout.CENTER);
 
-        card.setContent(body);
-        return card;
+        return body;
+    }
+
+    /** 底部状态栏：状态指示点 + 状态文本。 */
+    private JComponent buildStatusBar() {
+        JPanel bar = new JPanel(new BorderLayout(8, 0));
+        bar.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
+        bar.setOpaque(false);
+
+        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        left.setOpaque(false);
+        statusDot.setPreferredSize(new Dimension(12, 12));
+        left.add(statusDot);
+        statusLabel.setFont(statusLabel.getFont().deriveFont(Font.PLAIN, 12f));
+        left.add(statusLabel);
+        bar.add(left, BorderLayout.WEST);
+
+        return bar;
     }
 
     private JScrollPane wrapScroll(JComponent content) {
@@ -494,6 +541,9 @@ public class MainFrame extends JFrame {
 
     private void wireEvents() {
         themeButton.addActionListener(e -> toggleTheme());
+
+        // 资源文件过滤开关：切换时按当前状态重建树，保留已有勾选
+        chkHideResources.addItemListener(e -> rebuildTreeWithFilter());
 
         presetBox.addActionListener(e -> {
             if (syncingPreset) {
@@ -800,7 +850,8 @@ public class MainFrame extends JFrame {
                     @Override
                     protected void done() {
                         try {
-                            tree.rebuild(get());
+                            cachedEntries = get();
+                            rebuildTreeWithFilter();
                             log("JAR 条目加载完成，共 " + tree.root().getDepth() + " 层目录。");
                         } catch (Exception ex) {
                             JOptionPane.showMessageDialog(MainFrame.this,
@@ -811,6 +862,26 @@ public class MainFrame extends JFrame {
                     }
                 };
         worker.execute();
+    }
+
+    /** 根据当前“隐藏资源文件”开关重建树（保留已有勾选状态）。 */
+    private void rebuildTreeWithFilter() {
+        if (cachedEntries == null) {
+            return;
+        }
+        CheckBoxTree.Exclusion prev = tree.collectExclusions();
+        List<CheckBoxTree.PathEntry> filtered = cachedEntries;
+        if (chkHideResources.isSelected()) {
+            filtered = new ArrayList<CheckBoxTree.PathEntry>(cachedEntries.size());
+            for (CheckBoxTree.PathEntry e : cachedEntries) {
+                // 资源文件（非 class 的叶子）不参与排除，默认隐藏以避免淹没类/包
+                if (e.isClass || e.path.endsWith("/")) {
+                    filtered.add(e);
+                }
+            }
+        }
+        tree.rebuild(filtered);
+        tree.restore(prev.classes, prev.packages);
     }
 
     // ------------------------------------------------------------------
@@ -871,10 +942,13 @@ public class MainFrame extends JFrame {
         startButton.setEnabled(false);
         progressBar.setValue(0);
         progressBar.setIndeterminate(true);
+        runStartMillis = System.currentTimeMillis();
+        setStatus(RunState.RUNNING);
         log("———— 开始混淆 ————");
 
         SwingWorker<Void, String> worker = new SwingWorker<Void, String>() {
             private volatile boolean userCancelled = false;
+            private volatile boolean failed = false;
 
             @Override
             protected Void doInBackground() {
@@ -883,12 +957,15 @@ public class MainFrame extends JFrame {
                         publish(message);
                     }
 
-                    public void progress(int done, int total) {
+                    public void progress(final int done, final int total) {
                         SwingUtilities.invokeLater(new Runnable() {
                             public void run() {
                                 progressBar.setIndeterminate(false);
                                 progressBar.setMaximum(Math.max(1, total));
                                 progressBar.setValue(done);
+                                long elapsed = System.currentTimeMillis() - runStartMillis;
+                                statusLabel.setText("混淆中… " + done + "/" + total
+                                        + "  (" + (elapsed / 1000) + "s)");
                             }
                         });
                     }
@@ -900,6 +977,7 @@ public class MainFrame extends JFrame {
                 try {
                     new Obfuscator(cfg, listener).run();
                 } catch (final Throwable t) {
+                    failed = true;
                     publish("混淆失败：" + t);
                     java.io.StringWriter sw = new java.io.StringWriter();
                     t.printStackTrace(new java.io.PrintWriter(sw));
@@ -919,15 +997,54 @@ public class MainFrame extends JFrame {
             protected void done() {
                 startButton.setEnabled(true);
                 progressBar.setIndeterminate(false);
-                logArea.append("———— 结束 ————\n");
+                long elapsed = System.currentTimeMillis() - runStartMillis;
+                if (failed) {
+                    setStatus(RunState.ERROR, "失败（" + (elapsed / 1000) + "s）");
+                } else {
+                    setStatus(RunState.DONE, "完成（" + (elapsed / 1000) + "s）");
+                }
+                log("———— 结束 ————");
             }
         };
         worker.execute();
     }
 
+    private static final java.text.SimpleDateFormat LOG_TS =
+            new java.text.SimpleDateFormat("HH:mm:ss");
+
     private void log(String msg) {
-        logArea.append(msg + "\n");
+        String ts = "[" + LOG_TS.format(new java.util.Date()) + "] ";
+        try {
+            javax.swing.text.StyledDocument doc = logArea.getStyledDocument();
+            int end = doc.getLength();
+            // 时间戳：蓝色
+            javax.swing.text.SimpleAttributeSet tsAttr =
+                    new javax.swing.text.SimpleAttributeSet();
+            javax.swing.text.StyleConstants.setForeground(tsAttr, new Color(0x3B6FD4));
+            doc.insertString(end, ts, tsAttr);
+            // 正文：默认前景色
+            doc.insertString(doc.getLength(), msg + "\n", null);
+        } catch (javax.swing.text.BadLocationException e) {
+            // 退化为纯文本追加
+            logArea.setText(logArea.getText() + ts + msg + "\n");
+        }
         logArea.setCaretPosition(logArea.getDocument().getLength());
+    }
+
+    /** 更新状态栏文本与指示点颜色。 */
+    private void setStatus(RunState state, String text) {
+        statusLabel.setText(text);
+        statusDot.setState(state);
+        statusDot.repaint();
+    }
+
+    private void setStatus(RunState state) {
+        switch (state) {
+            case IDLE:    setStatus(state, "就绪"); break;
+            case RUNNING: setStatus(state, "混淆中…"); break;
+            case DONE:    setStatus(state, "完成"); break;
+            case ERROR:   setStatus(state, "失败"); break;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -973,6 +1090,38 @@ public class MainFrame extends JFrame {
             }
             g2.dispose();
             super.paintComponent(g);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 状态栏指示点：灰=空闲，蓝=运行中，绿=完成，红=失败
+    // ------------------------------------------------------------------
+
+    private static final class StatusDot extends JComponent {
+        private RunState state = RunState.IDLE;
+
+        void setState(RunState s) {
+            this.state = s;
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+            Color c;
+            switch (state) {
+                case RUNNING: c = new Color(0x3B6FD4); break;
+                case DONE:    c = new Color(0x2E9E5A); break;
+                case ERROR:   c = new Color(0xD4453B); break;
+                default:      c = new Color(0x9AA4B2); break;
+            }
+            int d = Math.min(getWidth(), getHeight());
+            int x = (getWidth() - d) / 2;
+            int y = (getHeight() - d) / 2;
+            g2.setColor(c);
+            g2.fillOval(x, y, d, d);
+            g2.dispose();
         }
     }
 
