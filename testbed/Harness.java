@@ -10,6 +10,17 @@ public class Harness {
         String preset = System.getenv("PRESET");
         if (preset == null) preset = "AGGRESSIVE";
         cfg.applyPreset(ObfConfig.Preset.valueOf(preset));
+        String harden = System.getenv("HARDEN");
+        if ("0".equals(harden)) {
+            cfg.decompilerHardening = false;
+        } else if ("1".equals(harden)) {
+            cfg.decompilerHardening = true;
+        }
+        String hardenPasses = System.getenv("HARDEN_PASSES");
+        if (hardenPasses != null) {
+            cfg.decompilerHardeningPasses = Math.max(1, Math.min(3,
+                    Integer.parseInt(hardenPasses.trim())));
+        }
         if ("1".equals(System.getenv("SPLIT"))) {
             cfg.deadCodeClasses = true;
             if (cfg.deadClassCount == 0) cfg.deadClassCount = 6;

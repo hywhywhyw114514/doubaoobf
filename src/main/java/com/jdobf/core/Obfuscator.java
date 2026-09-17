@@ -2,6 +2,7 @@ package com.jdobf.core;
 
 import com.jdobf.transform.ControlFlow;
 import com.jdobf.transform.ControlFlowFlatten;
+import com.jdobf.transform.DecompilerHardening;
 import com.jdobf.transform.CrossClassOutliner;
 import com.jdobf.transform.DeadClassFactory;
 import com.jdobf.transform.InterClassWeaver;
@@ -769,6 +770,16 @@ public class Obfuscator {
                         listener.log("  中继类平坦化 " + n + " 个方法: " + cn.name);
                     }
                 }
+                // 中继类也属于输出字节码的可见攻击面。它们不能参与前面的
+                // 字符串/交织变换，但可以安全接受最后一层结构扰动。
+                if (cfg.decompilerHardening && cfg.decompilerHardeningPasses > 0) {
+                    int n = DecompilerHardening.apply(cn, random,
+                            Math.max(1, Math.min(3, cfg.decompilerHardeningPasses)));
+                    if (n > 0) {
+                        listener.log("  中继类反编译器抗性增强 " + n
+                                + " 个方法: " + cn.name);
+                    }
+                }
                 return writeClassNode(cn, h);
             }
             if (cfg.encryptStrings) {
@@ -854,6 +865,15 @@ public class Obfuscator {
             if (cfg.controlFlow && cfg.controlFlowPasses > 0) {
                 ControlFlow.apply(cn, random,
                         Math.max(1, Math.min(3, cfg.controlFlowPasses)), weaveNetwork);
+            }
+            // 最后一层结构扰动：在所有业务/垃圾控制流已经定型后再加稀疏
+            // switch 入口与不可达异常岛，避免被后续平坦化重新规整。
+            if (cfg.decompilerHardening && cfg.decompilerHardeningPasses > 0) {
+                int n = DecompilerHardening.apply(cn, random,
+                        Math.max(1, Math.min(3, cfg.decompilerHardeningPasses)));
+                if (n > 0) {
+                    listener.log("  反编译器抗性增强 " + n + " 个方法: " + cn.name);
+                }
             }
             return writeClassNode(cn, h);
         } catch (Throwable t) {

@@ -56,6 +56,13 @@ public class ObfConfig implements Serializable {
     public boolean disperseLogic = false;
     /** 控制流平坦化（全方法 switch 状态机，激进，显著增大体积） */
     public boolean flattenControlFlow = false;
+    /**
+     * 反编译器抗性：在完成其它控制流变换后追加稀疏状态入口和不可达异常岛。
+     * 只生成 JVM 可验证字节码，用于降低 Procyon 等结构化反编译器的还原质量。
+     */
+    public boolean decompilerHardening = false;
+    /** 抗性等级：1=稀疏入口，2=入口 + 单异常岛，3=入口 + 重叠异常岛。 */
+    public int decompilerHardeningPasses = 3;
     /** 垃圾代码注入（向已有类注入永不调用的垃圾方法） */
     public boolean junkCode = false;
     /**
@@ -140,6 +147,7 @@ public class ObfConfig implements Serializable {
             case OFF:
                 renameClasses = renamePackages = renameMethods = renameFields = false;
                 encryptStrings = obfuscateNumbers = controlFlow = flattenControlFlow = false;
+                decompilerHardening = false;
                 junkCode = deadCodeClasses = shitBloat = j2c = false;
                 disperseLogic = false;
                 stripDebug = false;
@@ -158,6 +166,7 @@ public class ObfConfig implements Serializable {
                 controlFlow = false;
                 disperseLogic = false;
                 flattenControlFlow = false;
+                decompilerHardening = false;
                 junkCode = false;
                 shitBloat = false;
                 j2c = false;
@@ -177,6 +186,7 @@ public class ObfConfig implements Serializable {
                 controlFlow = false;
                 disperseLogic = true;
                 flattenControlFlow = false;
+                decompilerHardening = false;
                 junkCode = false;
                 shitBloat = false;
                 j2c = false;
@@ -196,6 +206,7 @@ public class ObfConfig implements Serializable {
                 controlFlow = true;
                 disperseLogic = true;
                 flattenControlFlow = true;
+                decompilerHardening = true;
                 junkCode = true;
                 shitBloat = false;
                 j2c = false;
@@ -255,6 +266,7 @@ public class ObfConfig implements Serializable {
         return renameClasses || renamePackages || renameMethods || renameFields
                 || encryptStrings || obfuscateNumbers || controlFlow
                 || flattenControlFlow || junkCode || shitBloat || j2c || deadCodeClasses
-                || splitRedirect || stripDebug || disperseLogic || vmpPack;
+                || splitRedirect || stripDebug || disperseLogic || vmpPack
+                || decompilerHardening;
     }
 }

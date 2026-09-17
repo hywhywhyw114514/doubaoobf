@@ -33,7 +33,7 @@ import java.util.Random;
  * <ul>
  *   <li><b>插入位置</b>：数据流分析出的全部栈空锚点中随机选点，守卫分散
  *       在方法体各处，不再堆在入口；构造器严格在 super/this 之后；</li>
- *   <li><b>恒等表达式</b>：8 种模板（LDC/垃圾槽混合的 XOR/SUB/乘 0/
+ *   <li><b>恒等表达式</b>：10 种模板（LDC/垃圾槽混合的 XOR/SUB/乘 0/
  *       取负相加/多层抵消），随机产出恒 0 或恒 1；</li>
  *   <li><b>分支结构</b>：真路 fall-through 跨过死块，或经 GOTO 到达，
  *       IFEQ/IFNE 极性随机翻转；</li>
@@ -311,10 +311,10 @@ public final class ControlFlow {
 
     /**
      * 向栈顶压入恒等 int：wantOne 为真时值恒为 1，否则恒为 0。
-     * 8 种模板，操作数混合随机 LDC 与方法垃圾槽。
+     * 10 种模板，操作数混合随机 LDC 与方法垃圾槽。
      */
     private static void emitCond(InsnList il, Random random, int slot, boolean wantOne) {
-        int t = random.nextInt(8);
+        int t = random.nextInt(10);
         int r = random.nextInt();
         int a = random.nextInt();
         int b = random.nextInt();
@@ -359,12 +359,28 @@ public final class ControlFlow {
                 il.add(new InsnNode(Opcodes.IXOR));
                 il.add(new InsnNode(Opcodes.IXOR));
                 break;
-            default: // s * -1 + s
+            case 7: // s * -1 + s
                 il.add(new VarInsnNode(Opcodes.ILOAD, slot));
                 il.add(new InsnNode(Opcodes.ICONST_M1));
                 il.add(new InsnNode(Opcodes.IMUL));
                 il.add(new VarInsnNode(Opcodes.ILOAD, slot));
                 il.add(new InsnNode(Opcodes.IADD));
+                break;
+            case 8: // (s | ~s) + 1 == 0; complements make the identity less obvious
+                il.add(new VarInsnNode(Opcodes.ILOAD, slot));
+                il.add(new VarInsnNode(Opcodes.ILOAD, slot));
+                il.add(new InsnNode(Opcodes.ICONST_M1));
+                il.add(new InsnNode(Opcodes.IXOR));
+                il.add(new InsnNode(Opcodes.IOR));
+                il.add(new InsnNode(Opcodes.ICONST_1));
+                il.add(new InsnNode(Opcodes.IADD));
+                break;
+            default: // (s & (s ^ -1)) == 0
+                il.add(new VarInsnNode(Opcodes.ILOAD, slot));
+                il.add(new VarInsnNode(Opcodes.ILOAD, slot));
+                il.add(new InsnNode(Opcodes.ICONST_M1));
+                il.add(new InsnNode(Opcodes.IXOR));
+                il.add(new InsnNode(Opcodes.IAND));
                 break;
         }
         if (wantOne) {

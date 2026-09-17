@@ -69,6 +69,8 @@ public class MainFrame extends JFrame {
     private final JCheckBox chkNumbers = new JCheckBox("数字常量混淆", false);
     private final JCheckBox chkControlFlow = new JCheckBox("控制流混淆", false);
     private final JCheckBox chkFlatten = new JCheckBox("控制流平坦化（switch 状态机）", false);
+    private final JCheckBox chkDecompilerHardening =
+            new JCheckBox("反编译器抗性（Procyon/结构化还原干扰）", false);
     private final JCheckBox chkDisperse =
             new JCheckBox("逻辑分散（语句外提 + 局部变量转字段）", false);
     private final JCheckBox chkJunk = new JCheckBox("垃圾方法注入（每类注入无用方法）", false);
@@ -340,9 +342,10 @@ public class MainFrame extends JFrame {
         addCheck(protectGrid, 1, 1, chkJunk);
         addCheck(protectGrid, 0, 2, chkFlatten);
         addCheck(protectGrid, 1, 2, chkDeadClasses);
+        addCheck(protectGrid, 0, 3, chkDecompilerHardening);
         GridBagConstraints wide = new GridBagConstraints();
         wide.gridx = 0;
-        wide.gridy = 3;
+        wide.gridy = 4;
         wide.gridwidth = 2;
         wide.anchor = GridBagConstraints.WEST;
         wide.insets = new Insets(4, 4, 4, 4);
@@ -360,7 +363,7 @@ public class MainFrame extends JFrame {
 + "</div></html>");
         GridBagConstraints shitGbc = new GridBagConstraints();
         shitGbc.gridx = 0;
-        shitGbc.gridy = 4;
+        shitGbc.gridy = 5;
         shitGbc.gridwidth = 2;
         shitGbc.anchor = GridBagConstraints.WEST;
         shitGbc.insets = new Insets(4, 4, 4, 20);
@@ -376,7 +379,7 @@ public class MainFrame extends JFrame {
 + "</div></html>");
         GridBagConstraints j2cGbc = new GridBagConstraints();
         j2cGbc.gridx = 0;
-        j2cGbc.gridy = 5;
+        j2cGbc.gridy = 6;
         j2cGbc.gridwidth = 2;
         j2cGbc.anchor = GridBagConstraints.WEST;
         j2cGbc.insets = new Insets(4, 4, 4, 20);
@@ -401,7 +404,7 @@ public class MainFrame extends JFrame {
         j2cNameRow.add(j2cNameField);
         GridBagConstraints j2cNameGbc = new GridBagConstraints();
         j2cNameGbc.gridx = 0;
-        j2cNameGbc.gridy = 6;
+        j2cNameGbc.gridy = 7;
         j2cNameGbc.gridwidth = 2;
         j2cNameGbc.anchor = GridBagConstraints.WEST;
         j2cNameGbc.insets = new Insets(0, 4, 4, 20);
@@ -418,14 +421,14 @@ public class MainFrame extends JFrame {
 + "</div></html>");
         GridBagConstraints vmpGbc = new GridBagConstraints();
         vmpGbc.gridx = 0;
-        vmpGbc.gridy = 7;
+        vmpGbc.gridy = 8;
         vmpGbc.gridwidth = 2;
         vmpGbc.anchor = GridBagConstraints.WEST;
         vmpGbc.insets = new Insets(0, 4, 4, 20);
         protectGrid.add(chkVmp, vmpGbc);
         chkVmp.setEnabled(false);
-        addCheck(protectGrid, 0, 8, chkStrip);
-        addCheck(protectGrid, 1, 8, chkDisperse);
+        addCheck(protectGrid, 0, 9, chkStrip);
+        addCheck(protectGrid, 1, 9, chkDisperse);
         chkDisperse.setToolTipText(
 "<html><div style='width:400px'>"
 + "消除「核心业务语句连续挤在一个方法里」的形态：<br>"
@@ -623,7 +626,7 @@ public class MainFrame extends JFrame {
     private JCheckBox[] allChecks() {
         return new JCheckBox[]{chkRenameClasses, chkRenamePackages, chkRenameMethods,
                 chkRenameFields, chkBraindeadRename, chkStrings, chkNumbers, chkControlFlow,
-                chkFlatten, chkDisperse, chkJunk, chkShitBloat, chkJ2c, chkDeadClasses,
+                chkFlatten, chkDecompilerHardening, chkDisperse, chkJunk, chkShitBloat, chkJ2c, chkDeadClasses,
                 chkSplitRedirect,
                 chkStrip, chkKeepSerializable, chkWatermark};
     }
@@ -649,6 +652,7 @@ public class MainFrame extends JFrame {
         chkNumbers.setSelected(tmp.obfuscateNumbers);
         chkControlFlow.setSelected(tmp.controlFlow);
         chkFlatten.setSelected(tmp.flattenControlFlow);
+        chkDecompilerHardening.setSelected(tmp.decompilerHardening);
         chkDisperse.setSelected(tmp.disperseLogic);
         chkJunk.setSelected(tmp.junkCode);
         chkShitBloat.setSelected(tmp.shitBloat);
@@ -915,6 +919,7 @@ public class MainFrame extends JFrame {
         cfg.obfuscateNumbers = chkNumbers.isSelected();
         cfg.controlFlow = chkControlFlow.isSelected();
         cfg.flattenControlFlow = chkFlatten.isSelected();
+        cfg.decompilerHardening = chkDecompilerHardening.isSelected();
         cfg.disperseLogic = chkDisperse.isSelected();
         cfg.junkCode = chkJunk.isSelected();
         cfg.shitBloat = chkShitBloat.isSelected();

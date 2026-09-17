@@ -417,6 +417,10 @@ public final class ShitBloat {
             emitSingleLoop(il, random, work, jc, 2 + random.nextInt(3));
         } else if (roll < 86) {
             emitMiniSwitch(il, random, work, js);
+        } else if (roll < 94) {
+            // 独立的恒定分支菱形：两条路径都只写垃圾槽，
+            // 但 CFG 保留独立分支和汇合点，增加结构化还原成本。
+            emitOpaqueDiamond(il, random, work);
         } else if (!smallPool.isEmpty()) {
             // 调用小型假方法，结果丢弃进垃圾槽
             String callee = smallPool.get(random.nextInt(smallPool.size()));
@@ -430,6 +434,22 @@ public final class ShitBloat {
             emitStorm(il, random, work, null, 6 + random.nextInt(14));
         }
         return il;
+    }
+
+    /** 栈空进出、无异常副作用的恒定分支菱形。 */
+    private static void emitOpaqueDiamond(InsnList il, Random random, int[] work) {
+        int slot = work[random.nextInt(work.length)];
+        LabelNode dead = new LabelNode();
+        LabelNode join = new LabelNode();
+        il.add(new VarInsnNode(Opcodes.ILOAD, slot));
+        il.add(new VarInsnNode(Opcodes.ILOAD, slot));
+        il.add(new InsnNode(Opcodes.IXOR));
+        il.add(new JumpInsnNode(Opcodes.IFEQ, dead));
+        emitStorm(il, random, work, null, 1 + random.nextInt(3));
+        il.add(new JumpInsnNode(Opcodes.GOTO, join));
+        il.add(dead);
+        emitStorm(il, random, work, null, 1 + random.nextInt(3));
+        il.add(join);
     }
 
     // ==================================================================

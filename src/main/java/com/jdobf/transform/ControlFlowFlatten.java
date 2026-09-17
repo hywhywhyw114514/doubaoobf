@@ -906,9 +906,17 @@ public final class ControlFlowFlatten {
             sc.body = buildRealBody(b, blocks.get(b), owner, realCase, blockCount,
                     mac, cases, usedKeys, bridgeMade, bridgeCap);
         }
-        // 6. 死诱饵体（有限循环 + 分叉，结尾指向随机真实状态）
-        for (StateCase dc : deadCases) {
-            dc.body = buildDeadBody(mac, realCase[random.nextInt(blockCount)]);
+        // 6. 死诱饵体（有限循环 + 分叉）。部分诱饵互相形成闭环，
+        // 其余才指向真实状态；所有这些状态都没有真实边可达，
+        // 因而不会改变业务语义，却让 CFG 不再是“死块 -> 真实块”的单层形状。
+        for (int d = 0; d < deadCases.size(); d++) {
+            StateCase victim;
+            if (deadCases.size() > 1 && random.nextInt(100) < 65) {
+                victim = deadCases.get((d + 1) % deadCases.size());
+            } else {
+                victim = realCase[random.nextInt(blockCount)];
+            }
+            deadCases.get(d).body = buildDeadBody(mac, victim);
         }
 
         // 7. 物理发射顺序：全部状态同池打乱
