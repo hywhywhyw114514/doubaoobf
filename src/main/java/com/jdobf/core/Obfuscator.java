@@ -17,6 +17,7 @@ import com.jdobf.transform.StripDebug;
 import com.jdobf.transform.StringEncryption;
 import com.jdobf.transform.Watermarker;
 import com.jdobf.j2c.BootImage;
+import com.jdobf.j2c.DbpPacker;
 import com.jdobf.j2c.J2c;
 import com.jdobf.j2c.J2cBuild;
 import com.jdobf.j2c.NativeToolchain;
@@ -560,17 +561,34 @@ public class Obfuscator {
                         J2c.encodeHidden(j2cPlan, j2cFullBytes);
                 // 双 DLL：payload（含隐藏类 blob）加密入 jar 永不落地；
                 // 通用 loader 加密入 jar，运行时短暂落地
-                boolean vmpWanted = cfg.vmpPack && com.jdobf.j2c.VmpPacker.available();
-                if (cfg.vmpPack && !vmpWanted) {
+                boolean vmpAvailable = com.jdobf.j2c.VmpPacker.available();
+                boolean dbpAvailable = DbpPacker.available();
+                boolean vmpWanted = cfg.vmpPack && vmpAvailable;
+                boolean dbpWanted = cfg.dbpPack && dbpAvailable && !vmpWanted;
+                if (cfg.vmpPack && cfg.dbpPack) {
+                    listener.log("[警告] VMProtect 与 DoubaoProtect 加壳互斥，"
+                            + (vmpWanted ? "已优先使用 VMProtect。"
+                                    : dbpWanted ? "已改用 DoubaoProtect。"
+                                            : "两者当前均不可用，回退为普通 j2c。"));
+                }
+                if (cfg.vmpPack && !vmpWanted && !dbpWanted) {
                     listener.log("[警告] VMProtect 加壳仅支持 Windows x64 且需要内置"
                             + "加壳器，本次构建回退为普通 j2c。");
-                } else if (vmpWanted) {
+                }
+                if (cfg.dbpPack && !dbpWanted && !vmpWanted) {
+                    listener.log("[警告] DoubaoProtect 加壳仅支持 Windows x64 且需要内置"
+                            + "加壳器/运行时，本次构建回退为普通 j2c。");
+                }
+                if (vmpWanted) {
                     listener.log("VMProtect 加壳已启用：虚拟化+变异标记覆盖全部下沉"
                             + "函数，开启打包/反调试/内存保护（关闭反虚拟机与内核检测）。");
+                } else if (dbpWanted) {
+                    listener.log("DoubaoProtect 加壳已启用：Ultra/变异标记覆盖"
+                            + "全部下沉函数，嵌入 DoubaoRT 运行时（默认关闭反虚拟机）。");
                 }
                 j2cArt = J2cBuild.build(j2cSpec, j2cPlan, hidden, random,
                         listener, new HashSet<String>(resources.keySet()),
-                        cfg.j2cNativeName, vmpWanted);
+                        cfg.j2cNativeName, vmpWanted, dbpWanted);
 
                 // DLL 编译成功后再生成 shell（假类全空心），替换节点映射，
                 // 使随后的 GuardChain 直接在 shell 上挂暗桩（CRC 覆盖最终字节）

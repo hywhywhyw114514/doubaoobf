@@ -60,6 +60,21 @@ public final class J2cBuild {
                                       Set<String> usedEntries,
                                       String customEntryName, boolean vmp)
             throws IOException, InterruptedException {
+        return build(spec, plan, hiddenBytes, random, listener, usedEntries,
+                customEntryName, vmp, false);
+    }
+
+    public static BootImage.Art build(BootImage.Spec spec, J2c.Plan plan,
+                                      Map<String, byte[]> hiddenBytes,
+                                      Random random, Obfuscator.Listener listener,
+                                      Set<String> usedEntries,
+                                      String customEntryName, boolean vmp,
+                                      boolean dbp)
+            throws IOException, InterruptedException {
+        if (vmp && dbp) {
+            throw new IllegalArgumentException("j2c: 不能同时启用 VMProtect 与 DoubaoProtect 加壳");
+        }
+        boolean protect = vmp || dbp;
         // 完整性检查：每个计划类都必须有捕获字节
         for (J2c.ClassPlan cp : plan.classes.values()) {
             if (!hiddenBytes.containsKey(cp.hiddenName)) {
@@ -94,33 +109,36 @@ public final class J2cBuild {
         String arm2 = distinctSymbol(random, arm1, bind1);
         String bind2 = distinctSymbol(random, arm1, bind1, arm2);
 
+        // 诊断开关：J2C_VMP_SCOPE / J2C_DBP_SCOPE = loader|payload（默认全部）
+        String scope = vmp ? System.getenv("J2C_VMP_SCOPE")
+                : dbp ? System.getenv("J2C_DBP_SCOPE") : null;
+        boolean packPayload = protect && !"loader".equals(scope);
+        boolean packLoader = protect && !"payload".equals(scope);
+
         String cpp1 = CppEmitter.emit(g0, random, arm1, bind1,
-                spec.boot, spec.map, plan.crossPart,
-                vmp && !"loader".equals(System.getenv("J2C_VMP_SCOPE")));
+                spec.boot, spec.map, plan.crossPart, packPayload);
         String cpp2 = CppEmitter.emit(g1, random, arm2, bind2,
-                spec.boot, spec.map, false,
-                vmp && !"loader".equals(System.getenv("J2C_VMP_SCOPE")));
+                spec.boot, spec.map, false, packPayload);
 
         NativeToolchain.Toolchain tc = NativeToolchain.preflight();
         File dir = Files.createTempDirectory("j2c-build-").toFile();
-        // 诊断开关 J2C_VMP_SCOPE=loader|payload（默认全部）
-        String vmpScope = System.getenv("J2C_VMP_SCOPE");
-        boolean packPayload = vmp && !"loader".equals(vmpScope);
-        boolean packLoader = vmp && !"payload".equals(vmpScope);
         try {
             long t0 = System.currentTimeMillis();
 
-            // VMP 标记头（始终生成；未定义 J2C_VMP 时宏为空操作）与内置
-            // VMProtect 工具链（仅 vmp 构建释放）
-            writeFile(new File(dir, "vmpmark.h"), vmpMarkHeader());
+            // 标记适配头（始终生成；未定义 J2C_VMP/J2C_DBP 时宏为空操作）
+            // 与内置加壳工具链（仅对应加壳构建释放）
+            writeFile(new File(dir, "vmpmark.h"), markHeader(vmp, dbp));
             if (vmp) {
                 VmpPacker.prepare(dir);
+            } else if (dbp) {
+                DbpPacker.prepare(dir);
             }
 
             // 1) 两个 payload DLL（各含一半隐藏类 blob，编译后加密，
             //    永不落地于运行机，全部由 loader 在 native 内存中映射）。
-            //    只有实际要加壳的 PE 才带 SDK 标记（否则会保留
-            //    VMProtectSDK64.dll 导入，运行机上没有该 DLL）。
+            //    只有实际要加壳的 PE 才带 SDK 标记（VMP 依赖
+            //    VMProtectSDK64.dll 导入；DBP 的标记库为静态链接，不会
+            //    给运行机新增任何外部依赖）。
             File cpp1File = new File(dir, "j2c1.cpp");
             File cpp2File = new File(dir, "j2c2.cpp");
             File p1Dll = new File(dir, "j2p1.dll");
@@ -130,19 +148,25 @@ public final class J2cBuild {
             listener.log("  j2c 正在用 "
                     + (tc.msvc ? "MSVC" : tc.compiler.getName())
                     + " 编译双原生桥接 payload"
-                    + (packPayload ? "（含 VMProtect 标记）" : "") + "...");
-            NativeToolchain.compile(tc, dir, cpp1File, p1Dll, packPayload);
-            NativeToolchain.compile(tc, dir, cpp2File, p2Dll, packPayload);
+                    + (packPayload ? "（含 "
+                            + (vmp ? "VMProtect" : "DoubaoProtect")
+                            + " 标记）" : "") + "...");
+            NativeToolchain.compile(tc, dir, cpp1File, p1Dll,
+                    packPayload && vmp, packPayload && dbp);
+            NativeToolchain.compile(tc, dir, cpp2File, p2Dll,
+                    packPayload && vmp, packPayload && dbp);
             byte[] p1Plain = readFile(p1Dll);
             byte[] p2Plain = readFile(p2Dll);
-            // VMP 加壳发生在 XOR 之前：加壳后的高熵 PE 再经密钥流加密入 jar。
+            // 加壳发生在 XOR 之前：加壳后的高熵 PE 再经密钥流加密入 jar。
             // 单个 PE 加壳失败不拖垮整个 j2c：该 PE 保留未加壳版本（仍经
             // XOR 加密入资源），仅告警。
             if (packPayload) {
                 File p1v = new File(dir, "j2p1v.dll");
                 File p2v = new File(dir, "j2p2v.dll");
-                p1Plain = vmpOrPlain(dir, "payload1", p1Dll, p1v, p1Plain, listener);
-                p2Plain = vmpOrPlain(dir, "payload2", p2Dll, p2v, p2Plain, listener);
+                p1Plain = packOrPlain(dir, "payload1", p1Dll, p1v, p1Plain,
+                        listener, vmp, dbp);
+                p2Plain = packOrPlain(dir, "payload2", p2Dll, p2v, p2Plain,
+                        listener, vmp, dbp);
             }
             int key1 = 1 + random.nextInt(254);
             int key2 = 1 + random.nextInt(254);
@@ -175,19 +199,21 @@ public final class J2cBuild {
             File loaderDll = new File(dir, "j2l.dll");
             writeFile(loaderFile, loaderSrc);
             long t1 = System.currentTimeMillis();
-            NativeToolchain.compile(tc, dir, loaderFile, loaderDll, packLoader);
+            NativeToolchain.compile(tc, dir, loaderFile, loaderDll,
+                    packLoader && vmp, packLoader && dbp);
             byte[] loaderPlain = readFile(loaderDll);
-            if (vmp && packLoader) {
+            if (packLoader) {
                 // loader 由 OS 直接 LoadLibrary（System.load），不经手动映射，
                 // 加壳后兼容性最有保障
                 File loaderV = new File(dir, "j2lv.dll");
-                loaderPlain = vmpOrPlain(dir, "loader", loaderDll, loaderV,
-                        loaderPlain, listener);
+                loaderPlain = packOrPlain(dir, "loader", loaderDll, loaderV,
+                        loaderPlain, listener, vmp, dbp);
             }
             listener.log("  j2c loader 编译完成，耗时 "
                     + (System.currentTimeMillis() - t1) / 1000.0 + "s，体积 "
                     + loaderPlain.length / 1024 + " KB（"
-                    + (vmp ? "VMProtect 加壳态" : "明文 PE")
+                    + (vmp ? "VMProtect 加壳态"
+                            : dbp ? "DoubaoProtect 加壳态" : "明文 PE")
                     + "前置进 jar，运行时 System.load 自身，零落地）");
 
             // 3) 两个 jar 加密资源条目名：用户自定义模板优先，
@@ -229,25 +255,40 @@ public final class J2cBuild {
      * 对单个 PE 加壳；失败时告警并回退未加壳字节（InterruptedException
      * 属用户取消，向上抛出不降级）。
      */
-    private static byte[] vmpOrPlain(File dir, String tag, File input, File output,
-                                     byte[] plainBytes, Obfuscator.Listener listener)
+    private static byte[] packOrPlain(File dir, String tag, File input, File output,
+                                      byte[] plainBytes, Obfuscator.Listener listener,
+                                      boolean vmp, boolean dbp)
             throws IOException, InterruptedException {
         try {
-            VmpPacker.pack(dir, tag, input, output, listener);
+            if (vmp) {
+                VmpPacker.pack(dir, tag, input, output, listener);
+            } else if (dbp) {
+                DbpPacker.pack(dir, tag, input, output, listener);
+            } else {
+                return plainBytes;
+            }
             return readFile(output);
         } catch (InterruptedException ie) {
             throw ie;
         } catch (IOException ioe) {
-            listener.log("[警告] " + tag + " VMProtect 加壳失败，该 PE 回退为"
+            String name = vmp ? "VMProtect" : "DoubaoProtect";
+            listener.log("[警告] " + tag + " " + name + " 加壳失败，该 PE 回退为"
                     + "未加壳版本（其余 PE 不受影响）：" + ioe.getMessage());
             return plainBytes;
         }
     }
 
     /**
-     * VMProtect 标记适配头（C/C++ 双兼容，payload C++ 与 loader 均 include）：
-     * J2C_VMP 由 {@link NativeToolchain} 仅在 VMP 构建时定义，未定义时所有
-     * 标记为空操作，普通 j2c 产物与旧路径字节一致。
+     * 标记适配头（C/C++ 双兼容，payload C++ 与 loader 均 include）。
+     * J2C_VMP / J2C_DBP 由 {@link NativeToolchain} 仅在对应加壳构建时定义；
+     * 都未定义时所有标记为空操作，普通 j2c 产物与旧路径字节一致。
+     */
+    private static byte[] markHeader(boolean vmp, boolean dbp) {
+        return dbp ? dbpMarkHeader() : vmpMarkHeader();
+    }
+
+    /**
+     * VMProtect 标记适配头：J2C_VMP 定义时链接 VMProtect SDK，否则空操作。
      */
     private static byte[] vmpMarkHeader() {
         // 诊断开关 J2C_VMP_LEVEL：mut=Ultra 降级为纯变异；virt=纯虚拟化
@@ -270,6 +311,37 @@ public final class J2cBuild {
                 + " * 运行时 CPUID 分发发射 AVX-512VL 的 EVEX 指令，vpmovwb 等）\n"
                 + " * 会让 VMProtect 反汇编器报 \"Command not supported db 62\"。\n"
                 + " * 标记区内的字节循环一律禁止向量化。 */\n"
+                + "#if defined(_MSC_VER)\n"
+                + "#define VMP_NOVEC __pragma(loop(no_vector))\n"
+                + "#define J2C_NOINLINE __declspec(noinline)\n"
+                + "#else\n"
+                + "#define VMP_NOVEC\n"
+                + "#define J2C_NOINLINE __attribute__((noinline))\n"
+                + "#endif\n"
+                + "#else\n"
+                + "#define VMP_BEGIN_ULTRA(n) ((void)0)\n"
+                + "#define VMP_BEGIN_VIRT(n)  ((void)0)\n"
+                + "#define VMP_BEGIN_MUT(n)   ((void)0)\n"
+                + "#define VMP_END()          ((void)0)\n"
+                + "#define VMP_NOVEC\n"
+                + "#define J2C_NOINLINE\n"
+                + "#endif\n";
+        return h.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * DoubaoProtect 标记适配头：J2C_DBP 定义时展开为 DoubaoProtect SDK
+     * 标记函数，否则空操作。沿用 VMP_* 宏名以复用 CppEmitter/loader.c。
+     */
+    private static byte[] dbpMarkHeader() {
+        String h = "#pragma once\n"
+                + "/* generated per build; do not edit */\n"
+                + "#ifdef J2C_DBP\n"
+                + "#include \"DoubaoProtect.h\"\n"
+                + "#define VMP_BEGIN_ULTRA(n) DoubaoProtectBeginUltra(n)\n"
+                + "#define VMP_BEGIN_VIRT(n)  DoubaoProtectBeginUltra(n)\n"
+                + "#define VMP_BEGIN_MUT(n)   DoubaoProtectBeginMutation(n)\n"
+                + "#define VMP_END()          DoubaoProtectEnd()\n"
                 + "#if defined(_MSC_VER)\n"
                 + "#define VMP_NOVEC __pragma(loop(no_vector))\n"
                 + "#define J2C_NOINLINE __declspec(noinline)\n"

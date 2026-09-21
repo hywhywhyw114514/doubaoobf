@@ -296,6 +296,13 @@ static int j_map(unsigned char *file, size_t flen, const char *armn,
     }
     jtrace("imports-ok");
 
+    /* TLS callbacks may live in executable sections. The image was just
+     * allocated PAGE_READWRITE, so make the whole mapping executable before
+     * invoking any callback; the per-section protection pass below restores
+     * the final rights before the entry point runs. DBP-packed payloads put
+     * a runtime TLS callback in a code section and would otherwise hit DEP. */
+    VirtualProtect(base, isize, PAGE_EXECUTE_READWRITE, &oldp);
+
     /* x64 unwind data for the mapped image */
     {
         DWORD xrva = oh->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress;
@@ -533,28 +540,26 @@ JNIEXPORT jint JNICALL J2C_MAPFN2(JNIEnv *env, jclass cls,
  */
 JNIEXPORT jint JNICALL J2C_BINDFN(JNIEnv *env, jclass cls, jobject shell) {
     VMP_BEGIN_MUT("bindfn");
-    bind_fn fn;
+    jint r = 0;
     if (!g_bin[0]) {
         jfail(env, "bind failed");
-        VMP_END();
-        return 0;
+    } else {
+        bind_fn fn = (bind_fn)g_bin[0];
+        r = fn(env, cls, shell);
     }
-    fn = (bind_fn)g_bin[0];
-    jint r = fn(env, cls, shell);
     VMP_END();
     return r;
 }
 
 JNIEXPORT jint JNICALL J2C_BINDFN2(JNIEnv *env, jclass cls, jobject shell) {
     VMP_BEGIN_MUT("bindfn2");
-    bind_fn fn;
+    jint r = 0;
     if (!g_bin[1]) {
         jfail(env, "bind failed");
-        VMP_END();
-        return 0;
+    } else {
+        bind_fn fn = (bind_fn)g_bin[1];
+        r = fn(env, cls, shell);
     }
-    fn = (bind_fn)g_bin[1];
-    jint r = fn(env, cls, shell);
     VMP_END();
     return r;
 }

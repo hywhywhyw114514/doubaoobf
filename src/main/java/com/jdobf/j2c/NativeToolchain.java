@@ -198,7 +198,7 @@ public final class NativeToolchain {
      */
     public static String compile(Toolchain tc, File buildDir, File cppFile, File dllFile)
             throws IOException, InterruptedException {
-        return compile(tc, buildDir, cppFile, dllFile, false);
+        return compile(tc, buildDir, cppFile, dllFile, false, false);
     }
 
     /**
@@ -206,9 +206,12 @@ public final class NativeToolchain {
      *                   VMProtect SDK 调用）并链接 VMProtectSDK64 导入库，
      *                   同时关闭 ICF/REF 折叠保证每个被标记入口 RVA 唯一。
      *                   构建目录需已放入 VMProtectSDK.h 与对应导入库。
+     * @param dbpMarkers 为 true 时定义 J2C_DBP（标记宏展开为 DoubaoProtect
+     *                   SDK 调用）；MSVC 链接 DoubaoSDK.lib，MinGW 额外编译
+     *                   由 {@link DbpPacker#prepare(File)} 生成的 dbpmarks.cpp。
      */
     public static String compile(Toolchain tc, File buildDir, File cppFile, File dllFile,
-                                 boolean vmpMarkers)
+                                 boolean vmpMarkers, boolean dbpMarkers)
             throws IOException, InterruptedException {
         ProcessBuilder pb;
         if (tc.msvc) {
@@ -216,11 +219,13 @@ public final class NativeToolchain {
             String cmd = "\"" + tc.compiler.getAbsolutePath() + "\" >nul 2>nul && "
                     + "cl /nologo /utf-8 /O2 /MT /EHsc /LD "
                     + (vmpMarkers ? "/D J2C_VMP " : "")
+                    + (dbpMarkers ? "/D J2C_DBP " : "")
                     + "/I\"" + tc.jniInclude.getAbsolutePath() + "\" "
                     + "/I\"" + tc.jniPlatform.getAbsolutePath() + "\" "
                     + "\"" + cppFile.getName() + "\" "
                     + "/Fe:\"" + dllFile.getName() + "\" /link /RELEASE /DLL"
-                    + (vmpMarkers ? " VMProtectSDK64.lib /OPT:NOICF /OPT:NOREF" : "");
+                    + (vmpMarkers ? " VMProtectSDK64.lib /OPT:NOICF /OPT:NOREF" : "")
+                    + (dbpMarkers ? " DoubaoSDK.lib /OPT:NOICF /OPT:NOREF" : "");
             pb = new ProcessBuilder("cmd.exe", "/c", cmd);
         } else {
             java.util.List<String> args = new java.util.ArrayList<String>();
@@ -233,12 +238,19 @@ public final class NativeToolchain {
             if (vmpMarkers) {
                 args.add("-DJ2C_VMP");
             }
+            if (dbpMarkers) {
+                args.add("-DJ2C_DBP");
+            }
             args.add("-I" + tc.jniInclude.getAbsolutePath());
             args.add("-I" + tc.jniPlatform.getAbsolutePath());
             args.add(cppFile.getName());
             if (vmpMarkers) {
                 // 直接把 MinGW 导入归档作为输入，不依赖 -L/-l 命名规则
                 args.add("VMProtectSDK64.a");
+            }
+            if (dbpMarkers) {
+                // DbpPacker.prepare 生成的全局汇编标记函数（x64 COFF）
+                args.add("dbpmarks.cpp");
             }
             args.add("-o");
             args.add(dllFile.getName());

@@ -90,6 +90,16 @@ public class ObfConfig implements Serializable {
      */
     public boolean vmpPack = false;
     /**
+     * DoubaoProtect 加壳（需要 j2c）：j2c 的 loader 与双 payload 编译后，先以
+     * SDK 标记（Ultra/变异）包裹全部 JNI 函数，再调用内置的
+     * DoubaoProtect.exe 对标记区域做保护，并把对应架构的
+     * DoubaoRT 运行时嵌入 PE（默认关闭反虚拟机以免误伤云主机/CI/沙箱）。
+     * loader 前置进 jar 头部、payload 再经 XOR 加密入资源，落盘产物的关键段
+     * 全部呈高熵。仅 Windows x64，找不到内置 DoubaoProtect 时自动降级为
+     * 普通 j2c 并告警。与 {@link #vmpPack} 互斥。
+     */
+    public boolean dbpPack = false;
+    /**
      * j2c 两个加密 native payload 在产出 jar 内的资源条目名模板（留空 = 每构建
      * 随机伪装名）。支持占位符 {@code {}}，分别替换为 1/2，例如
      * {@code native/engine{}.dat} → {@code native/engine1.dat}、
@@ -266,7 +276,7 @@ public class ObfConfig implements Serializable {
         return renameClasses || renamePackages || renameMethods || renameFields
                 || encryptStrings || obfuscateNumbers || controlFlow
                 || flattenControlFlow || junkCode || shitBloat || j2c || deadCodeClasses
-                || splitRedirect || stripDebug || disperseLogic || vmpPack
+                || splitRedirect || stripDebug || disperseLogic || vmpPack || dbpPack
                 || decompilerHardening;
     }
 }

@@ -55,6 +55,9 @@ public class Harness {
         if ("1".equals(System.getenv("VMP"))) {
             cfg.vmpPack = true;
         }
+        if ("1".equals(System.getenv("DBP"))) {
+            cfg.dbpPack = true;
+        }
         String j2cName = System.getenv("J2C_NATIVE_NAME");
         if (j2cName != null) {
             cfg.j2cNativeName = j2cName;

@@ -80,6 +80,8 @@ public class MainFrame extends JFrame {
             new JCheckBox("j2c 原生下沉（混淆后真实逻辑转 C++/DLL，Java 层只剩虚假类）", false);
     private final JCheckBox chkVmp =
             new JCheckBox("VMProtect 加壳（j2c 产物虚拟化+变异，需 j2c，仅 Win64）", false);
+    private final JCheckBox chkDbp =
+            new JCheckBox("DoubaoProtect 加壳（j2c 产物 Ultra/变异保护，需 j2c，仅 Win64）", false);
     private final JTextField j2cNameField = new JTextField(22);
     private final JSpinner shitCount =
             new JSpinner(new javax.swing.SpinnerNumberModel(60, 0, 400, 1));
@@ -427,8 +429,28 @@ public class MainFrame extends JFrame {
         vmpGbc.insets = new Insets(0, 4, 4, 20);
         protectGrid.add(chkVmp, vmpGbc);
         chkVmp.setEnabled(false);
-        addCheck(protectGrid, 0, 9, chkStrip);
-        addCheck(protectGrid, 1, 9, chkDisperse);
+        chkDbp.setToolTipText(
+"<html><div style='width:420px'>"
++ "在 j2c 编译出的三个 PE（loader + 双 payload）上启用内置 DoubaoProtect：<br>"
++ "· 每个下沉函数随机使用<b>Ultra / 变异</b>标记；<br>"
++ "· 加壳器把标记区域改写为 DoubaoProtect 运行时门控，并将对应架构的"
++ " DoubaoRT 运行时嵌入 PE；<br>"
++ "· 默认开启反调试/反内存转储/反注入，<b>不</b>开反虚拟机（避免误伤"
++ "云主机/CI/沙箱，可用 J2C_DBP_FULL=1 恢复完整默认防护）；<br>"
++ "· 加壳后的高熵 PE 再经原有 XOR 密钥流加密入 jar；<br>"
++ "· 仅 <b>Windows x64</b> 构建，构建时间与产物体积明显增加；单个 PE 加壳"
++ "失败时自动回退为未加壳版本。"
++ "</div></html>");
+        GridBagConstraints dbpGbc = new GridBagConstraints();
+        dbpGbc.gridx = 0;
+        dbpGbc.gridy = 9;
+        dbpGbc.gridwidth = 2;
+        dbpGbc.anchor = GridBagConstraints.WEST;
+        dbpGbc.insets = new Insets(0, 4, 4, 20);
+        protectGrid.add(chkDbp, dbpGbc);
+        chkDbp.setEnabled(false);
+        addCheck(protectGrid, 0, 10, chkStrip);
+        addCheck(protectGrid, 1, 10, chkDisperse);
         chkDisperse.setToolTipText(
 "<html><div style='width:400px'>"
 + "消除「核心业务语句连续挤在一个方法里」的形态：<br>"
@@ -587,16 +609,30 @@ public class MainFrame extends JFrame {
                 watermarkField.setEnabled(chkWatermark.isSelected()));
         watermarkField.setEnabled(chkWatermark.isSelected());
 
-        // j2c 开关与 native 文件名输入框、VMP 勾选联动
+        // j2c 开关与 native 文件名输入框、VMP/DBP 勾选联动
         chkJ2c.addItemListener(e -> {
             j2cNameField.setEnabled(chkJ2c.isSelected());
             chkVmp.setEnabled(chkJ2c.isSelected());
+            chkDbp.setEnabled(chkJ2c.isSelected());
             if (!chkJ2c.isSelected()) {
                 chkVmp.setSelected(false);
+                chkDbp.setSelected(false);
             }
         });
         j2cNameField.setEnabled(chkJ2c.isSelected());
         chkVmp.setEnabled(chkJ2c.isSelected());
+        chkDbp.setEnabled(chkJ2c.isSelected());
+        // 两种加壳器互斥：勾选一个时取消另一个，避免产物行为不确定
+        chkVmp.addItemListener(e -> {
+            if (chkVmp.isSelected() && chkDbp.isSelected()) {
+                chkDbp.setSelected(false);
+            }
+        });
+        chkDbp.addItemListener(e -> {
+            if (chkDbp.isSelected() && chkVmp.isSelected()) {
+                chkVmp.setSelected(false);
+            }
+        });
 
         // 类拆分与重定向互锁：必须先开启伪代码类注入；关闭伪代码类时
         // 自动取消勾选并禁用，避免产生无效配置
@@ -626,7 +662,8 @@ public class MainFrame extends JFrame {
     private JCheckBox[] allChecks() {
         return new JCheckBox[]{chkRenameClasses, chkRenamePackages, chkRenameMethods,
                 chkRenameFields, chkBraindeadRename, chkStrings, chkNumbers, chkControlFlow,
-                chkFlatten, chkDecompilerHardening, chkDisperse, chkJunk, chkShitBloat, chkJ2c, chkDeadClasses,
+                chkFlatten, chkDecompilerHardening, chkDisperse, chkJunk, chkShitBloat,
+                chkJ2c, chkVmp, chkDbp, chkDeadClasses,
                 chkSplitRedirect,
                 chkStrip, chkKeepSerializable, chkWatermark};
     }
@@ -658,9 +695,11 @@ public class MainFrame extends JFrame {
         chkShitBloat.setSelected(tmp.shitBloat);
         chkJ2c.setSelected(tmp.j2c);
         chkVmp.setSelected(tmp.vmpPack && tmp.j2c);
+        chkDbp.setSelected(tmp.dbpPack && tmp.j2c);
         j2cNameField.setText(tmp.j2cNativeName == null ? "" : tmp.j2cNativeName);
         j2cNameField.setEnabled(tmp.j2c);
         chkVmp.setEnabled(tmp.j2c);
+        chkDbp.setEnabled(tmp.j2c);
         chkDeadClasses.setSelected(tmp.deadCodeClasses);
         chkStrip.setSelected(tmp.stripDebug);
         chkKeepSerializable.setSelected(tmp.keepSerializableFields);
@@ -925,6 +964,7 @@ public class MainFrame extends JFrame {
         cfg.shitBloat = chkShitBloat.isSelected();
         cfg.j2c = chkJ2c.isSelected();
         cfg.vmpPack = chkVmp.isSelected() && chkJ2c.isSelected();
+        cfg.dbpPack = chkDbp.isSelected() && chkJ2c.isSelected();
         cfg.j2cNativeName = j2cNameField.getText();
         cfg.deadCodeClasses = chkDeadClasses.isSelected();
         // 硬保险：UI 已互锁，这里再兜底一次（无伪代码类时拆分无意义）
